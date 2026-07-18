@@ -1,14 +1,9 @@
 package com.kilagbe.fakegps
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -49,86 +44,9 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun PermissionRequestScreen(onRequestClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(SurfaceColor)
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            Icons.Filled.LocationOn,
-            contentDescription = null,
-            tint = Teal,
-            modifier = Modifier.size(56.dp)
-        )
-        Spacer(Modifier.height(16.dp))
-        Text(
-            "লোকেশন পারমিশন দরকার",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "অ্যাপটি চালাতে লোকেশন পারমিশন দিতে হবে। এরপর Developer Options থেকে " +
-                "\"Select mock location app\"-এ গিয়ে এই অ্যাপ বেছে নিতে হবে।",
-            fontSize = 13.sp,
-            color = TextSecondary,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
-        Spacer(Modifier.height(20.dp))
-        Button(
-            onClick = onRequestClick,
-            colors = ButtonDefaults.buttonColors(containerColor = Teal)
-        ) {
-            Text("পারমিশন দিন")
-        }
-    }
-}
-
-@Composable
 fun AppRoot() {
     val context = LocalContext.current
     val repo = remember { LocationRepository(context) }
-
-    var permissionsGranted by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context, Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        permissionsGranted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true
-    }
-
-    LaunchedEffect(Unit) {
-        val permissionsToRequest = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        if (!permissionsGranted) {
-            permissionLauncher.launch(permissionsToRequest.toTypedArray())
-        }
-    }
-
-    if (!permissionsGranted) {
-        PermissionRequestScreen {
-            val permissionsToRequest = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            permissionLauncher.launch(permissionsToRequest.toTypedArray())
-        }
-        return
-    }
-
     var tab by remember { mutableStateOf("map") }
     val saved by repo.savedLocationsFlow.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
