@@ -1,10 +1,16 @@
 package com.kilagbe.fakegps
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -192,6 +198,33 @@ fun stopMock(context: android.content.Context) {
     ContextCompat.startForegroundService(context, intent)
 }
 
+@SuppressLint("MissingPermission")
+fun fetchCurrentLocation(context: Context, onResult: (Double, Double) -> Unit) {
+    val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    var best: Location? = null
+    for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
+        try {
+            val loc = lm.getLastKnownLocation(provider)
+            if (loc != null && (best == null || loc.accuracy < best!!.accuracy)) best = loc
+        } catch (_: Exception) { }
+    }
+    if (best != null) {
+        onResult(best.latitude, best.longitude)
+        return
+    }
+    val listener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            onResult(location.latitude, location.longitude)
+            try { lm.removeUpdates(this) } catch (_: Exception) { }
+        }
+    }
+    try {
+        val provider = if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER))
+            LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
+        lm.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
+    } catch (_: Exception) { }
+}
+
 @Composable
 fun MapScreen(repo: LocationRepository) {
     val context = LocalContext.current
@@ -200,6 +233,26 @@ fun MapScreen(repo: LocationRepository) {
     var centerLng by remember { mutableStateOf(90.4125) }
     var locked by remember { mutableStateOf(false) }
     var showDialog by remember { mutableStateOf(false) }
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var mapViewRef by remember { mutableStateOf<MapView?>(null) }
+    var jumpTarget by remember { mutableStateOf<GeoPoint?>(null) }
+
+    // On first load, try to center on the device's real current location.
+    LaunchedEffect(Unit) {
+        fetchCurrentLocation(context) { lat, lng ->
+            centerLat = lat
+            centerLng = lng
+            jumpTarget = GeoPoint(lat, lng)
+        }
+    }
+
+    // Whenever jumpTarget changes (from GPS fetch, recenter button, or the
+    // coordinate dialog), actually move the underlying MapView.
+    LaunchedEffect(jumpTarget) {
+        jumpTarget?.let { target ->
+            mapViewRef?.controller?.animateTo(target)
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         AndroidView(
@@ -219,6 +272,7 @@ fun MapScreen(repo: LocationRepository) {
                         }
                         override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean = false
                     })
+                    mapViewRef = this
                 }
             }
         )
@@ -256,6 +310,22 @@ fun MapScreen(repo: LocationRepository) {
             Icon(Icons.Filled.Tag, contentDescription = "কোঅর্ডিনেট বসান")
         }
 
+        // Recenter on real GPS location
+        SmallFloatingActionButton(
+            onClick = {
+                fetchCurrentLocation(context) { lat, lng ->
+                    centerLat = lat
+                    centerLng = lng
+                    jumpTarget = GeoPoint(lat, lng)
+                }
+            },
+            containerColor = SurfaceColor,
+            contentColor = Teal,
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 68.dp, end = 12.dp)
+        ) {
+            Icon(Icons.Filled.MyLocation, contentDescription = "বর্তমান লোকেশনে যান")
+        }
+
         // Bottom action buttons
         Row(
             Modifier
@@ -288,11 +358,7 @@ fun MapScreen(repo: LocationRepository) {
                     Text("বন্ধ করুন")
                 }
                 IconButton(
-                    onClick = {
-                        scope.launch {
-                            repo.addLocation(SavedLocation("স্পট", centerLat, centerLng))
-                        }
-                    },
+                    onClick = { showSaveDialog = true },
                     modifier = Modifier
                         .size(48.dp)
                         .background(SurfaceColor, RoundedCornerShape(12.dp))
@@ -303,6 +369,18 @@ fun MapScreen(repo: LocationRepository) {
         }
     }
 
+    if (showSaveDialog) {
+        SaveNameDialog(
+            onDismiss = { showSaveDialog = false },
+            onConfirm = { name ->
+                scope.launch {
+                    repo.addLocation(SavedLocation(name, centerLat, centerLng))
+                }
+                showSaveDialog = false
+            }
+        )
+    }
+
     if (showDialog) {
         CoordinateDialog(
             initialLat = centerLat,
@@ -311,10 +389,38 @@ fun MapScreen(repo: LocationRepository) {
             onConfirm = { lat, lng ->
                 centerLat = lat
                 centerLng = lng
+                jumpTarget = GeoPoint(lat, lng)
                 showDialog = false
             }
         )
     }
+}
+
+@Composable
+fun SaveNameDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("লোকেশনের নাম দিন") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                placeholder = { Text("যেমন: বাসা, অফিস") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (name.isNotBlank()) onConfirm(name.trim()) },
+                enabled = name.isNotBlank()
+            ) { Text("সেভ করুন", color = Teal) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("বাতিল") }
+        }
+    )
 }
 
 @Composable
