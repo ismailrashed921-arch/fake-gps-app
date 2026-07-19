@@ -16,12 +16,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlin.random.Random
 
-/**
- * Foreground service that registers this app as the system's mock location
- * provider (requires the user to have selected it once under
- * Settings > Developer Options > Select mock location app) and continuously
- * feeds a chosen latitude/longitude to Android's LocationManager.
- */
 class MockLocationService : Service() {
 
     companion object {
@@ -32,7 +26,17 @@ class MockLocationService : Service() {
         const val EXTRA_LNG = "extra_lng"
         const val EXTRA_NAME = "extra_name"
         const val NOTIF_ID = 1001
-        private const val PROVIDER = LocationManager.GPS_PROVIDER
+
+        private val PROVIDERS: List<String>
+            get() {
+                val list = mutableListOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    list.add(LocationManager.FUSED_PROVIDER)
+                } else {
+                    list.add("fused")
+                }
+                return list
+            }
     }
 
     private var job: Job? = null
@@ -73,20 +77,21 @@ class MockLocationService : Service() {
     private fun startFeeding() {
         job?.cancel()
         val lm = getSystemService(LOCATION_SERVICE) as LocationManager
-        try {
-            lm.addTestProvider(
-                PROVIDER,
-                false, false, false, false,
-                true, true, true,
-                android.location.Criteria.POWER_LOW,
-                android.location.Criteria.ACCURACY_FINE
-            )
-        } catch (_: Exception) {
-            // Provider may already exist; safe to ignore.
+
+        for (provider in PROVIDERS) {
+            try {
+                lm.addTestProvider(
+                    provider,
+                    false, false, false, false,
+                    true, true, true,
+                    android.location.Criteria.POWER_LOW,
+                    android.location.Criteria.ACCURACY_FINE
+                )
+            } catch (_: Exception) { }
+            try {
+                lm.setTestProviderEnabled(provider, true)
+            } catch (_: Exception) { }
         }
-        try {
-            lm.setTestProviderEnabled(PROVIDER, true)
-        } catch (_: Exception) { }
 
         job = scope.launch {
             while (true) {
@@ -101,25 +106,35 @@ class MockLocationService : Service() {
     private fun pushLocation(lm: LocationManager) {
         val lat = if (jitterEnabled) currentLat + Random.nextDouble(-0.00005, 0.00005) else currentLat
         val lng = if (jitterEnabled) currentLng + Random.nextDouble(-0.00005, 0.00005) else currentLng
-        val location = Location(PROVIDER).apply {
-            latitude = lat
-            longitude = lng
-            altitude = 0.0
-            accuracy = 5f
-            time = System.currentTimeMillis()
-            elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+
+        for (provider in PROVIDERS) {
+            val location = Location(provider).apply {
+                latitude = lat
+                longitude = lng
+                altitude = 0.0
+                accuracy = 5f
+                time = System.currentTimeMillis()
+                elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    bearingAccuracyDegrees = 0.1f
+                    verticalAccuracyMeters = 0.1f
+                    speedAccuracyMetersPerSecond = 0.01f
+                }
+            }
+            try {
+                lm.setTestProviderLocation(provider, location)
+            } catch (_: Exception) { }
         }
-        try {
-            lm.setTestProviderLocation(PROVIDER, location)
-        } catch (_: Exception) { }
     }
 
     private fun stopFeeding() {
         job?.cancel()
         val lm = getSystemService(LOCATION_SERVICE) as LocationManager
-        try {
-            lm.removeTestProvider(PROVIDER)
-        } catch (_: Exception) { }
+        for (provider in PROVIDERS) {
+            try {
+                lm.removeTestProvider(provider)
+            } catch (_: Exception) { }
+        }
     }
 
     override fun onDestroy() {
