@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_background"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Fake GPS"
+        android:textColor="#0F172A"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:paddingBottom="6dp" />
+
+    <LinearLayout
+        android:id="@+id/widget_locations_container"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical" />
+
+    <TextView
+        android:id="@+id/widget_stop_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:background="@drawable/widget_off_bg"
+        android:gravity="center"
+        android:padding="8dp"
+        android:text="বন্ধ করুন"
+        android:textColor="#DC2626"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

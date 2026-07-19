@@ -49,11 +49,13 @@ class LocationRepository(private val context: Context) {
         val current = getSavedLocations().toMutableList()
         current.add(loc)
         persist(current)
+        FakeGpsWidgetProvider.updateWidgets(context)
     }
 
     suspend fun removeLocation(name: String) {
         val current = getSavedLocations().filterNot { it.name == name }
         persist(current)
+        FakeGpsWidgetProvider.updateWidgets(context)
     }
 
     private suspend fun persist(list: List<SavedLocation>) {
@@ -77,6 +79,7 @@ class LocationRepository(private val context: Context) {
             prefs[PrefKeys.ACTIVE_LNG] = lng
             prefs[PrefKeys.ACTIVE_NAME] = name ?: ""
         }
+        FakeGpsWidgetProvider.updateWidgets(context)
     }
 
     suspend fun setAutoStart(enabled: Boolean) {
