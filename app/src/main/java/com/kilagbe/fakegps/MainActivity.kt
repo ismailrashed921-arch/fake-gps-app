@@ -260,8 +260,14 @@ fun MapScreen(repo: LocationRepository) {
             val marker = Marker(map).apply {
                 position = GeoPoint(loc.lat, loc.lng)
                 title = loc.name
+                snippet = "ট্যাপ করে এই লোকেশন সেট করুন"
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setOnMarkerClickListener { m, _ ->
+                    centerLat = loc.lat
+                    centerLng = loc.lng
+                    jumpTarget = GeoPoint(loc.lat, loc.lng)
+                    locked = true
+                    startMock(context, loc.lat, loc.lng, loc.name)
                     m.showInfoWindow()
                     true
                 }
