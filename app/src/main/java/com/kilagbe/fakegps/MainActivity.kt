@@ -41,6 +41,7 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -236,8 +237,8 @@ fun MapScreen(repo: LocationRepository) {
     var showSaveDialog by remember { mutableStateOf(false) }
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var jumpTarget by remember { mutableStateOf<GeoPoint?>(null) }
+    val savedLocations by repo.savedLocationsFlow.collectAsState(initial = emptyList())
 
-    // On first load, try to center on the device's real current location.
     LaunchedEffect(Unit) {
         fetchCurrentLocation(context) { lat, lng ->
             centerLat = lat
@@ -246,12 +247,28 @@ fun MapScreen(repo: LocationRepository) {
         }
     }
 
-    // Whenever jumpTarget changes (from GPS fetch, recenter button, or the
-    // coordinate dialog), actually move the underlying MapView.
     LaunchedEffect(jumpTarget) {
         jumpTarget?.let { target ->
             mapViewRef?.controller?.animateTo(target)
         }
+    }
+
+    LaunchedEffect(savedLocations, mapViewRef) {
+        val map = mapViewRef ?: return@LaunchedEffect
+        map.overlays.removeAll { it is Marker }
+        savedLocations.forEach { loc ->
+            val marker = Marker(map).apply {
+                position = GeoPoint(loc.lat, loc.lng)
+                title = loc.name
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                setOnMarkerClickListener { m, _ ->
+                    m.showInfoWindow()
+                    true
+                }
+            }
+            map.overlays.add(marker)
+        }
+        map.invalidate()
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -277,7 +294,6 @@ fun MapScreen(repo: LocationRepository) {
             }
         )
 
-        // Center pin overlay
         Icon(
             Icons.Filled.LocationOn,
             contentDescription = null,
@@ -285,7 +301,6 @@ fun MapScreen(repo: LocationRepository) {
             modifier = Modifier.align(Alignment.Center).size(40.dp)
         )
 
-        // Coordinate readout pill
         Surface(
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 70.dp),
             shape = RoundedCornerShape(20.dp),
@@ -300,7 +315,6 @@ fun MapScreen(repo: LocationRepository) {
             )
         }
 
-        // Manual coordinate entry button
         SmallFloatingActionButton(
             onClick = { showDialog = true },
             containerColor = SurfaceColor,
@@ -310,7 +324,6 @@ fun MapScreen(repo: LocationRepository) {
             Icon(Icons.Filled.Tag, contentDescription = "কোঅর্ডিনেট বসান")
         }
 
-        // Recenter on real GPS location
         SmallFloatingActionButton(
             onClick = {
                 fetchCurrentLocation(context) { lat, lng ->
@@ -326,7 +339,6 @@ fun MapScreen(repo: LocationRepository) {
             Icon(Icons.Filled.MyLocation, contentDescription = "বর্তমান লোকেশনে যান")
         }
 
-        // Bottom action buttons
         Row(
             Modifier
                 .align(Alignment.BottomCenter)
