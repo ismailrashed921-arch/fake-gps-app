@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -24,6 +25,8 @@ object PrefKeys {
     val ACTIVE_NAME = stringPreferencesKey("active_name")
     val AUTO_START = booleanPreferencesKey("auto_start")
     val JITTER = booleanPreferencesKey("jitter")
+    val AUTO_CYCLE = booleanPreferencesKey("auto_cycle")
+    val AUTO_CYCLE_MINUTES = intPreferencesKey("auto_cycle_minutes")
 }
 
 class LocationRepository(private val context: Context) {
@@ -40,6 +43,14 @@ class LocationRepository(private val context: Context) {
                 prefs[PrefKeys.ACTIVE] ?: false,
                 prefs[PrefKeys.ACTIVE_LAT] ?: 23.8103,
                 prefs[PrefKeys.ACTIVE_LNG] ?: 90.4125
+            )
+        }
+
+    val autoCycleFlow: Flow<Pair<Boolean, Int>> =
+        context.dataStore.data.map { prefs ->
+            Pair(
+                prefs[PrefKeys.AUTO_CYCLE] ?: false,
+                prefs[PrefKeys.AUTO_CYCLE_MINUTES] ?: 10
             )
         }
 
@@ -88,6 +99,13 @@ class LocationRepository(private val context: Context) {
 
     suspend fun setJitter(enabled: Boolean) {
         context.dataStore.edit { prefs -> prefs[PrefKeys.JITTER] = enabled }
+    }
+
+    suspend fun setAutoCycle(enabled: Boolean, minutes: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[PrefKeys.AUTO_CYCLE] = enabled
+            prefs[PrefKeys.AUTO_CYCLE_MINUTES] = minutes
+        }
     }
 
     private fun parseLocations(raw: String): List<SavedLocation> {

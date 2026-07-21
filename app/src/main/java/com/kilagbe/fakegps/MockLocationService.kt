@@ -22,10 +22,12 @@ class MockLocationService : Service() {
     companion object {
         const val ACTION_START = "com.kilagbe.fakegps.action.START"
         const val ACTION_SWITCH = "com.kilagbe.fakegps.action.SWITCH"
+        const val ACTION_START_CYCLE = "com.kilagbe.fakegps.action.START_CYCLE"
         const val ACTION_STOP = "com.kilagbe.fakegps.action.STOP"
         const val EXTRA_LAT = "extra_lat"
         const val EXTRA_LNG = "extra_lng"
         const val EXTRA_NAME = "extra_name"
+        const val EXTRA_INTERVAL_MINUTES = "extra_interval_minutes"
         const val NOTIF_ID = 1001
         private const val PUSH_INTERVAL_MS = 1000L
 
@@ -42,18 +44,22 @@ class MockLocationService : Service() {
     }
 
     private var job: Job? = null
+    private var cycleJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Default)
     private var currentLat = 23.8103
     private var currentLng = 90.4125
     private var currentName: String = "কাস্টম"
     private var jitterEnabled = false
     private var wakeLock: PowerManager.WakeLock? = null
+    private var cyclingActive = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START, ACTION_SWITCH -> {
+                cyclingActive = false
+                cycleJob?.cancel()
                 currentLat = intent.getDoubleExtra(EXTRA_LAT, currentLat)
                 currentLng = intent.getDoubleExtra(EXTRA_LNG, currentLng)
                 currentName = intent.getStringExtra(EXTRA_NAME) ?: currentName
@@ -65,18 +71,54 @@ class MockLocationService : Service() {
                         .setActive(true, currentLat, currentLng, currentName)
                 }
             }
+            ACTION_START_CYCLE -> {
+                val minutes = intent.getIntExtra(EXTRA_INTERVAL_MINUTES, 10)
+                startForeground(NOTIF_ID, NotificationHelper.build(this, true, currentName))
+                acquireWakeLock()
+                startCycling(minutes)
+            }
             ACTION_STOP -> {
+                cyclingActive = false
+                cycleJob?.cancel()
                 stopFeeding()
                 releaseWakeLock()
                 runBlocking {
-                    LocationRepository(applicationContext)
-                        .setActive(false, currentLat, currentLng, currentName)
+                    LocationRepository(applicationContext).apply {
+                        setActive(false, currentLat, currentLng, currentName)
+                        setAutoCycle(false, 10)
+                    }
                 }
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
         }
         return START_STICKY
+    }
+
+    private fun startCycling(minutes: Int) {
+        cyclingActive = true
+        val repo = LocationRepository(applicationContext)
+        runBlocking { repo.setAutoCycle(true, minutes) }
+
+        cycleJob?.cancel()
+        cycleJob = scope.launch {
+            var index = 0
+            while (cyclingActive) {
+                val saved = repo.getSavedLocations()
+                if (saved.isEmpty()) {
+                    delay(5000)
+                    continue
+                }
+                val loc = saved[index % saved.size]
+                currentLat = loc.lat
+                currentLng = loc.lng
+                currentName = loc.name
+                startFeeding()
+                repo.setActive(true, currentLat, currentLng, currentName)
+                index++
+                delay(minutes * 60_000L)
+            }
+        }
     }
 
     private fun acquireWakeLock() {
@@ -163,6 +205,8 @@ class MockLocationService : Service() {
     }
 
     override fun onDestroy() {
+        cyclingActive = false
+        cycleJob?.cancel()
         stopFeeding()
         releaseWakeLock()
         super.onDestroy()

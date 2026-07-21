@@ -199,6 +199,14 @@ fun stopMock(context: android.content.Context) {
     ContextCompat.startForegroundService(context, intent)
 }
 
+fun startAutoCycle(context: android.content.Context, minutes: Int) {
+    val intent = Intent(context, MockLocationService::class.java).apply {
+        action = MockLocationService.ACTION_START_CYCLE
+        putExtra(MockLocationService.EXTRA_INTERVAL_MINUTES, minutes)
+    }
+    ContextCompat.startForegroundService(context, intent)
+}
+
 @SuppressLint("MissingPermission")
 fun fetchCurrentLocation(context: Context, onResult: (Double, Double) -> Unit) {
     val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -575,9 +583,13 @@ fun SavedScreen(
 
 @Composable
 fun SettingsScreen(repo: LocationRepository) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var autoStart by remember { mutableStateOf(true) }
     var jitter by remember { mutableStateOf(false) }
+    val autoCycleState by repo.autoCycleFlow.collectAsState(initial = Pair(false, 10))
+    var minutesText by remember(autoCycleState.second) { mutableStateOf(autoCycleState.second.toString()) }
+    val savedCount by repo.savedLocationsFlow.collectAsState(initial = emptyList())
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("সেটিংস", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
@@ -591,6 +603,80 @@ fun SettingsScreen(repo: LocationRepository) {
         SettingsToggleRow("র‍্যান্ডম জিটার (±৫ মিটার)", jitter) {
             jitter = it
             scope.launch { repo.setJitter(it) }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "অটো সাইকেল",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary
+        )
+        Text(
+            "চালু করলে সেভ করা লোকেশনগুলো নিচের সময় অনুযায়ী একটার পর একটা নিজে থেকে বদলাতে থাকবে। বন্ধ থাকলে সবসময়ের মতো ম্যানুয়ালি লোকেশন সেট করতে হবে।",
+            fontSize = 11.sp,
+            color = TextSecondary,
+            modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
+        )
+
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = SurfaceColor,
+            border = BorderStroke(1.dp, BorderColor),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "অটো সাইকেল চালু করুন",
+                        modifier = Modifier.weight(1f),
+                        color = TextPrimary,
+                        fontSize = 14.sp
+                    )
+                    Switch(
+                        checked = autoCycleState.first,
+                        onCheckedChange = { checked ->
+                            val minutes = minutesText.toIntOrNull()?.coerceAtLeast(1) ?: 10
+                            if (checked) {
+                                if (savedCount.isEmpty()) return@Switch
+                                scope.launch { repo.setAutoCycle(true, minutes) }
+                                startAutoCycle(context, minutes)
+                            } else {
+                                scope.launch { repo.setAutoCycle(false, minutes) }
+                                stopMock(context)
+                            }
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Teal)
+                    )
+                }
+
+                if (savedCount.isEmpty()) {
+                    Text(
+                        "প্রথমে অন্তত একটা লোকেশন সেভ করুন",
+                        color = Color(0xFFDC2626),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Text("কত মিনিট পরপর বদলাবে", color = TextSecondary, fontSize = 11.sp)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = minutesText,
+                    onValueChange = { text ->
+                        minutesText = text.filter { it.isDigit() }
+                        val minutes = minutesText.toIntOrNull()
+                        if (minutes != null && minutes > 0) {
+                            scope.launch { repo.setAutoCycle(autoCycleState.first, minutes) }
+                            if (autoCycleState.first) startAutoCycle(context, minutes)
+                        }
+                    },
+                    suffix = { Text("মিনিট") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(0.5f)
+                )
+            }
         }
     }
 }
