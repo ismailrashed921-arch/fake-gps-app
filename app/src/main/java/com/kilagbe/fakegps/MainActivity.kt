@@ -237,6 +237,8 @@ fun MapScreen(repo: LocationRepository) {
     var showSaveDialog by remember { mutableStateOf(false) }
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var jumpTarget by remember { mutableStateOf<GeoPoint?>(null) }
+    var activePinPosition by remember { mutableStateOf<GeoPoint?>(null) }
+    var activeMarker by remember { mutableStateOf<Marker?>(null) }
     val savedLocations by repo.savedLocationsFlow.collectAsState(initial = emptyList())
 
     LaunchedEffect(Unit) {
@@ -255,24 +257,46 @@ fun MapScreen(repo: LocationRepository) {
 
     LaunchedEffect(savedLocations, mapViewRef) {
         val map = mapViewRef ?: return@LaunchedEffect
-        map.overlays.removeAll { it is Marker }
+        map.overlays.removeAll { it is Marker && it.relatedObject == "saved" }
+        val pinDrawable = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_map_pin)
         savedLocations.forEach { loc ->
             val marker = Marker(map).apply {
                 position = GeoPoint(loc.lat, loc.lng)
                 title = loc.name
                 snippet = "ট্যাপ করে এই লোকেশন সেট করুন"
+                icon = pinDrawable
+                relatedObject = "saved"
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setOnMarkerClickListener { m, _ ->
                     centerLat = loc.lat
                     centerLng = loc.lng
                     jumpTarget = GeoPoint(loc.lat, loc.lng)
                     locked = true
+                    activePinPosition = GeoPoint(loc.lat, loc.lng)
                     startMock(context, loc.lat, loc.lng, loc.name)
                     m.showInfoWindow()
                     true
                 }
             }
             map.overlays.add(marker)
+        }
+        map.invalidate()
+    }
+
+    LaunchedEffect(activePinPosition, mapViewRef) {
+        val map = mapViewRef ?: return@LaunchedEffect
+        activeMarker?.let { map.overlays.remove(it) }
+        activeMarker = null
+        activePinPosition?.let { pos ->
+            val activeIcon = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_map_pin_active)
+            val marker = Marker(map).apply {
+                position = pos
+                title = "সক্রিয় লোকেশন"
+                icon = activeIcon
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            }
+            map.overlays.add(marker)
+            activeMarker = marker
         }
         map.invalidate()
     }
@@ -345,44 +369,46 @@ fun MapScreen(repo: LocationRepository) {
             Icon(Icons.Filled.MyLocation, contentDescription = "বর্তমান লোকেশনে যান")
         }
 
-        Row(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 24.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            if (!locked) {
-                Button(
-                    onClick = {
-                        locked = true
-                        startMock(context, centerLat, centerLng, "কাস্টম")
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Teal)
+            if (locked) {
+                FloatingActionButton(
+                    onClick = { showSaveDialog = true },
+                    containerColor = SurfaceColor,
+                    contentColor = Teal,
+                    modifier = Modifier.size(46.dp)
                 ) {
-                    Icon(Icons.Filled.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("এই লোকেশন সেট করুন")
+                    Icon(Icons.Filled.Star, contentDescription = "সেভ করুন", modifier = Modifier.size(20.dp))
+                }
+                FloatingActionButton(
+                    onClick = {
+                        locked = false
+                        activePinPosition = null
+                        stopMock(context)
+                    },
+                    containerColor = Color(0xFFFEF2F2),
+                    contentColor = Color(0xFFDC2626),
+                    modifier = Modifier.size(46.dp)
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = "বন্ধ করুন", modifier = Modifier.size(20.dp))
                 }
             } else {
-                OutlinedButton(
-                    onClick = { locked = false; stopMock(context) },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TealDark)
-                ) {
-                    Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("বন্ধ করুন")
-                }
-                IconButton(
-                    onClick = { showSaveDialog = true },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(SurfaceColor, RoundedCornerShape(12.dp))
-                ) {
-                    Icon(Icons.Filled.Star, contentDescription = "সেভ করুন", tint = Teal)
-                }
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        locked = true
+                        activePinPosition = GeoPoint(centerLat, centerLng)
+                        startMock(context, centerLat, centerLng, "কাস্টম")
+                    },
+                    containerColor = Teal,
+                    contentColor = Color.White,
+                    icon = { Icon(Icons.Filled.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    text = { Text("সেট করুন", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+                )
             }
         }
     }
