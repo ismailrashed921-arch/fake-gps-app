@@ -6,6 +6,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +27,7 @@ class MockLocationService : Service() {
         const val EXTRA_LNG = "extra_lng"
         const val EXTRA_NAME = "extra_name"
         const val NOTIF_ID = 1001
+        private const val PUSH_INTERVAL_MS = 1000L
 
         private val PROVIDERS: List<String>
             get() {
@@ -45,6 +47,7 @@ class MockLocationService : Service() {
     private var currentLng = 90.4125
     private var currentName: String = "কাস্টম"
     private var jitterEnabled = false
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -55,6 +58,7 @@ class MockLocationService : Service() {
                 currentLng = intent.getDoubleExtra(EXTRA_LNG, currentLng)
                 currentName = intent.getStringExtra(EXTRA_NAME) ?: currentName
                 startForeground(NOTIF_ID, NotificationHelper.build(this, true, currentName))
+                acquireWakeLock()
                 startFeeding()
                 runBlocking {
                     LocationRepository(applicationContext)
@@ -63,6 +67,7 @@ class MockLocationService : Service() {
             }
             ACTION_STOP -> {
                 stopFeeding()
+                releaseWakeLock()
                 runBlocking {
                     LocationRepository(applicationContext)
                         .setActive(false, currentLat, currentLng, currentName)
@@ -72,6 +77,22 @@ class MockLocationService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK, "FakeGPS:MockLocationWakeLock"
+        ).apply {
+            setReferenceCounted(false)
+            acquire(12 * 60 * 60 * 1000L)
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
     }
 
     private fun startFeeding() {
@@ -94,11 +115,15 @@ class MockLocationService : Service() {
         }
 
         job = scope.launch {
+            var tick = 0
             while (true) {
                 pushLocation(lm)
-                NotificationManagerCompat.from(this@MockLocationService)
-                    .notify(NOTIF_ID, NotificationHelper.build(this@MockLocationService, true, currentName))
-                delay(2000)
+                tick++
+                if (tick % 5 == 0) {
+                    NotificationManagerCompat.from(this@MockLocationService)
+                        .notify(NOTIF_ID, NotificationHelper.build(this@MockLocationService, true, currentName))
+                }
+                delay(PUSH_INTERVAL_MS)
             }
         }
     }
@@ -112,7 +137,7 @@ class MockLocationService : Service() {
                 latitude = lat
                 longitude = lng
                 altitude = 0.0
-                accuracy = 5f
+                accuracy = 3f
                 time = System.currentTimeMillis()
                 elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -139,6 +164,7 @@ class MockLocationService : Service() {
 
     override fun onDestroy() {
         stopFeeding()
+        releaseWakeLock()
         super.onDestroy()
     }
 }
