@@ -14,7 +14,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlin.random.Random
 
 class MockLocationService : Service() {
@@ -66,9 +65,9 @@ class MockLocationService : Service() {
                 startForeground(NOTIF_ID, NotificationHelper.build(this, true, currentName))
                 acquireWakeLock()
                 startFeeding()
-                runBlocking {
-                    LocationRepository(applicationContext)
-                        .setActive(true, currentLat, currentLng, currentName)
+                val lat = currentLat; val lng = currentLng; val name = currentName
+                scope.launch {
+                    LocationRepository(applicationContext).setActive(true, lat, lng, name)
                 }
             }
             ACTION_START_CYCLE -> {
@@ -82,9 +81,10 @@ class MockLocationService : Service() {
                 cycleJob?.cancel()
                 stopFeeding()
                 releaseWakeLock()
-                runBlocking {
+                val lat = currentLat; val lng = currentLng; val name = currentName
+                scope.launch {
                     LocationRepository(applicationContext).apply {
-                        setActive(false, currentLat, currentLng, currentName)
+                        setActive(false, lat, lng, name)
                         setAutoCycle(false, 10)
                     }
                 }
@@ -98,10 +98,10 @@ class MockLocationService : Service() {
     private fun startCycling(minutes: Int) {
         cyclingActive = true
         val repo = LocationRepository(applicationContext)
-        runBlocking { repo.setAutoCycle(true, minutes) }
 
         cycleJob?.cancel()
         cycleJob = scope.launch {
+            repo.setAutoCycle(true, minutes)
             var index = 0
             while (cyclingActive) {
                 val saved = repo.getSavedLocations()
