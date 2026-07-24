@@ -2,7 +2,7 @@ workflows:
   android-debug:
     name: Fake GPS - Debug APK
     max_build_duration: 30
-    instance_type: linux_x1
+    instance_type: linux
     environment:
       java: 17
     scripts:
