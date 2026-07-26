@@ -27,6 +27,8 @@ object PrefKeys {
     val JITTER = booleanPreferencesKey("jitter")
     val AUTO_CYCLE = booleanPreferencesKey("auto_cycle")
     val AUTO_CYCLE_MINUTES = intPreferencesKey("auto_cycle_minutes")
+    val REAL_LAT = doublePreferencesKey("real_lat")
+    val REAL_LNG = doublePreferencesKey("real_lng")
 }
 
 class LocationRepository(private val context: Context) {
@@ -106,6 +108,20 @@ class LocationRepository(private val context: Context) {
             prefs[PrefKeys.AUTO_CYCLE] = enabled
             prefs[PrefKeys.AUTO_CYCLE_MINUTES] = minutes
         }
+    }
+
+    suspend fun setRealLocation(lat: Double, lng: Double) {
+        context.dataStore.edit { prefs ->
+            prefs[PrefKeys.REAL_LAT] = lat
+            prefs[PrefKeys.REAL_LNG] = lng
+        }
+    }
+
+    suspend fun getRealLocation(): Pair<Double, Double>? {
+        val prefs = context.dataStore.data.first()
+        val lat = prefs[PrefKeys.REAL_LAT]
+        val lng = prefs[PrefKeys.REAL_LNG]
+        return if (lat != null && lng != null) Pair(lat, lng) else null
     }
 
     private fun parseLocations(raw: String): List<SavedLocation> {

@@ -46,6 +46,15 @@ import org.osmdroid.views.overlay.Marker
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val f = java.io.File(filesDir, "crash_log.txt")
+                f.appendText("\n---- " + java.util.Date().toString() + " ----\n")
+                f.appendText(android.util.Log.getStackTraceString(throwable))
+            } catch (_: Exception) { }
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
         Configuration.getInstance().userAgentValue = packageName
         setContent {
             FakeGPSTheme {
