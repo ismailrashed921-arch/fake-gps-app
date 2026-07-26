@@ -2,6 +2,8 @@ package com.kilagbe.fakegps
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -21,7 +23,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -42,25 +46,71 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import java.io.File
+import java.util.Date
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
-                val f = java.io.File(filesDir, "crash_log.txt")
-                f.appendText("\n---- " + java.util.Date().toString() + " ----\n")
+                val f = File(filesDir, "crash_log.txt")
+                f.appendText("\n---- " + Date().toString() + " ----\n")
                 f.appendText(android.util.Log.getStackTraceString(throwable))
             } catch (_: Exception) { }
             defaultHandler?.uncaughtException(thread, throwable)
         }
+
         Configuration.getInstance().userAgentValue = packageName
         setContent {
             FakeGPSTheme {
                 AppRoot()
             }
         }
+    }
+}
+
+@Composable
+fun CrashLogDialog(context: Context) {
+    val crashLogFile = remember { File(context.filesDir, "crash_log.txt") }
+    var crashLogContent by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        if (crashLogFile.exists()) {
+            val text = crashLogFile.readText()
+            if (text.isNotBlank()) crashLogContent = text
+        }
+    }
+
+    val content = crashLogContent
+    if (content != null) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("ক্র্যাশ লগ পাওয়া গেছে") },
+            text = {
+                Column(
+                    Modifier
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(content, fontSize = 11.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("crash log", content))
+                }) { Text("কপি করুন", color = Teal) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    crashLogFile.delete()
+                    crashLogContent = null
+                }) { Text("মুছে ফেলুন", color = Color(0xFFDC2626)) }
+            }
+        )
     }
 }
 
@@ -109,6 +159,8 @@ fun PermissionRequestScreen(onRequestClick: () -> Unit) {
 fun AppRoot() {
     val context = LocalContext.current
     val repo = remember { LocationRepository(context) }
+
+    CrashLogDialog(context)
 
     var permissionsGranted by remember {
         mutableStateOf(
@@ -249,20 +301,33 @@ fun MapScreen(repo: LocationRepository) {
     val scope = rememberCoroutineScope()
     var centerLat by remember { mutableStateOf(23.8103) }
     var centerLng by remember { mutableStateOf(90.4125) }
-    var locked by remember { mutableStateOf(false) }
     var showDialog by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var jumpTarget by remember { mutableStateOf<GeoPoint?>(null) }
-    var activePinPosition by remember { mutableStateOf<GeoPoint?>(null) }
     var activeMarker by remember { mutableStateOf<Marker?>(null) }
+    var initialCentered by remember { mutableStateOf(false) }
     val savedLocations by repo.savedLocationsFlow.collectAsState(initial = emptyList())
 
-    LaunchedEffect(Unit) {
-        fetchCurrentLocation(context) { lat, lng ->
-            centerLat = lat
-            centerLng = lng
-            jumpTarget = GeoPoint(lat, lng)
+    val activeState by repo.activeStateFlow.collectAsState(initial = Triple(false, 23.8103, 90.4125))
+    val locked = activeState.first
+    val activePinLatLng: Pair<Double, Double>? =
+        if (activeState.first) Pair(activeState.second, activeState.third) else null
+
+    LaunchedEffect(activeState) {
+        if (initialCentered) return@LaunchedEffect
+        initialCentered = true
+        if (activeState.first) {
+            centerLat = activeState.second
+            centerLng = activeState.third
+            jumpTarget = GeoPoint(activeState.second, activeState.third)
+        } else {
+            fetchCurrentLocation(context) { lat, lng ->
+                centerLat = lat
+                centerLng = lng
+                jumpTarget = GeoPoint(lat, lng)
+                scope.launch { repo.setRealLocation(lat, lng) }
+            }
         }
     }
 
@@ -288,8 +353,6 @@ fun MapScreen(repo: LocationRepository) {
                     centerLat = loc.lat
                     centerLng = loc.lng
                     jumpTarget = GeoPoint(loc.lat, loc.lng)
-                    locked = true
-                    activePinPosition = GeoPoint(loc.lat, loc.lng)
                     startMock(context, loc.lat, loc.lng, loc.name)
                     m.showInfoWindow()
                     true
@@ -300,14 +363,14 @@ fun MapScreen(repo: LocationRepository) {
         map.invalidate()
     }
 
-    LaunchedEffect(activePinPosition, mapViewRef) {
+    LaunchedEffect(activePinLatLng, mapViewRef) {
         val map = mapViewRef ?: return@LaunchedEffect
         activeMarker?.let { map.overlays.remove(it) }
         activeMarker = null
-        activePinPosition?.let { pos ->
+        activePinLatLng?.let { (lat, lng) ->
             val activeIcon = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_map_pin_active)
             val marker = Marker(map).apply {
-                position = pos
+                position = GeoPoint(lat, lng)
                 title = "সক্রিয় লোকেশন"
                 icon = activeIcon
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
@@ -373,10 +436,28 @@ fun MapScreen(repo: LocationRepository) {
 
         SmallFloatingActionButton(
             onClick = {
-                fetchCurrentLocation(context) { lat, lng ->
-                    centerLat = lat
-                    centerLng = lng
-                    jumpTarget = GeoPoint(lat, lng)
+                scope.launch {
+                    if (locked) {
+                        val real = repo.getRealLocation()
+                        if (real != null) {
+                            centerLat = real.first
+                            centerLng = real.second
+                            jumpTarget = GeoPoint(real.first, real.second)
+                        } else {
+                            fetchCurrentLocation(context) { lat, lng ->
+                                centerLat = lat
+                                centerLng = lng
+                                jumpTarget = GeoPoint(lat, lng)
+                            }
+                        }
+                    } else {
+                        fetchCurrentLocation(context) { lat, lng ->
+                            centerLat = lat
+                            centerLng = lng
+                            jumpTarget = GeoPoint(lat, lng)
+                            scope.launch { repo.setRealLocation(lat, lng) }
+                        }
+                    }
                 }
             },
             containerColor = SurfaceColor,
@@ -403,11 +484,7 @@ fun MapScreen(repo: LocationRepository) {
                     Icon(Icons.Filled.Star, contentDescription = "সেভ করুন", modifier = Modifier.size(20.dp))
                 }
                 FloatingActionButton(
-                    onClick = {
-                        locked = false
-                        activePinPosition = null
-                        stopMock(context)
-                    },
+                    onClick = { stopMock(context) },
                     containerColor = Color(0xFFFEF2F2),
                     contentColor = Color(0xFFDC2626),
                     modifier = Modifier.size(46.dp)
@@ -416,11 +493,7 @@ fun MapScreen(repo: LocationRepository) {
                 }
             } else {
                 ExtendedFloatingActionButton(
-                    onClick = {
-                        locked = true
-                        activePinPosition = GeoPoint(centerLat, centerLng)
-                        startMock(context, centerLat, centerLng, "কাস্টম")
-                    },
+                    onClick = { startMock(context, centerLat, centerLng, "কাস্টম") },
                     containerColor = Teal,
                     contentColor = Color.White,
                     icon = { Icon(Icons.Filled.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp)) },
